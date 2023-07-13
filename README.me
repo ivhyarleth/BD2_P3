@@ -1,0 +1,114 @@
+# Proyecto 3 | Bases de Datos Multimedia
+
+**_Integrantes:_**
+- Lapa Carhuamaca, Arleth Ivhy
+
+## Introducción
+
+El objetivo de este proyecto es aplicar algoritmos de búsqueda y recuperación de la información eficiente de imágenes, para ello se implementa un servicio web de reconocimiento facial para personas a partir de una colección grande de imágenes de rostros humanos. El proceso de generar dicha aplicación  contempla tres pasos, los cuales son: Extracción de características, Indexación de vectores característicos para búsquedas eficientes y aplicación del algoritmo de búsqueda KNN.  Estos procedimientos forman el backend, mientras que, para una interacción con los usuarios se realizó el frontend, en el cual puede realizar una consulta con una foto externa y retorna el top-k de las imágenes más parecidas.
+
+## Implementación
+
+### Librerías utilizadas
+
+Face Recognition: Se realiza el uso de las funciones face_encodings y face_distance.
+Rtree: Métodos de indexación espacial para Python.
+
+### Dataset
+Se usará una colección de 13 mil imágenes de rostros de personas aproximadamente extraídas de Labeled Faces in the Wild.
+
+### Construccion del indice Rtree
+Para construir el índice Rtree, se usó la librería Rtree de python para aplicar los métodos de indexación para los vectores característicos.
+
+### Algoritmo de búsqueda KNN
+
+#### KNN-Secuencial
+La búsqueda del algoritmo de KNN, se usa un priority queue y retorna los K vecinos más cercanos al query. El procedimiento es el siguiente: se indexa las caras conocidas hasta "n" y llevamos un contador. Una vez que hemos llegado a "n", cerramos la indexación en memoria y se pasa esta información en un bucle for a la función de la librería Face Recognition face_distance. Agregaremos las distancias correspondientes a una estructura heap queue, con la cual finalmente retornaremos los K resultados más cercanos a nuestra query. Lo más notorio al realizar la búsqueda secuencial de esta manera, es que la gran mayoría del tiempo utilizado es la primera parte, indexar. Calcular, guardar y retornar los resultados resulta mucho más rápido, como se podrá apreciar en la experimentación realizada.
+
+```js
+def knn_sequential(query, k_results):
+    result = []
+    for person, encodings in face_encodings.items(): # O(N x D)
+        for img, encoding in encodings:
+            dist = euclidean_distance(query, encoding)
+            result.append((person, dist, img))
+    result.sort(key=lambda tup: tup[1]) # O(N x logN)
+    return result[:k_results]
+```
+
+#### KNN-Rtree
+En primer lugar, se usa el índice Rtree guardado, y se asignan los valores necesarios correspondientes. Luego se realiza el encoder de la query a procesar Finalmente, para cada elemento en la lista del query (ya que es posible que existan varias caras), se agrega a la variable que recibe la función de la librería Rtree.
+La búsqueda por rango en el RTree requiere de dos puntos que representan un MBR, y retorna los puntos que se encuentren en él. Para adaptarlo a nuestra implementación, debemos crear este MBR a partir del vector característico de búsqueda, sumando y restando el radio a sus 128 dimensiones. Luego, cuando retorne los resultados, debemos descartar los que se encuentren fuera del radio de cobertura, además de ordenar por distancia ya que no los trae ordenados.
+
+```js
+def knn_rtree(self, query, k_results):
+    heap = []
+    min_distance = sys.float_info.max
+    leaf_region = None
+    for leaf in self.idx.leaves():
+      if self.mindist(query, leaf[2]) < min_distance: # leaf[2] -> region bounds
+        min_distance = self.mindist(query, leaf[2])
+        leaf_region = leaf
+    for point in leaf_region[1]: # leaf_region[1] -> points
+      person = id_person[point][0]
+      img_path = id_person[point][1]
+      encoding = id_person[point][2]
+      distance = euclidean_distance(query, encoding)
+      if len(heap) < k_results:
+        heapq.heappush(heap, (-distance, person, img_path))
+      else:
+        r = heap[0] # front
+        if distance <= -r[0]:
+          heapq.heappush(heap, (-distance, person, img_path))
+          heapq.heappop(heap)
+    heap = [(person, -dist, img_path) for dist, person, img_path in heap]
+    heap.sort(key=lambda tup:tup[1]) # O(k_results x log(k_results))
+    return heap
+
+  def knn_by_range(self, query, radius):
+    result = []
+    for person, encodings in face_encodings.items(): # O(N x D)
+      for img, encoding in encodings:
+        dist = euclidean_distance(query, encoding)
+        if dist <= radius:
+          result.append((person, dist, img))
+    result.sort(key=lambda tup:tup[1]) # O(N x logN)
+    return result
+```
+
+#### KNN-HighD
+
+```js
+def priority_kd(self, query, k_results):
+        heap = []
+        self.search_kdtree(self.root, query, k_results, heap)
+        heap = [(person, -dist, img_path) for dist, person, img_path in heap]
+        heap.sort(key=lambda tup: tup[1]) # O(k_results x log(k_results))
+        return heap
+```
+
+
+### Análisis de la maldición de la dimensionalidad 
+
+Dentro de Machine Learning a medida que se tiene un conjunto de datos con muchas dimensiones, es decir datos con múltiples características provoca dos principales errores, estos son:
+La distancia entre los datos aumenta cuando el número de dimensiones aumenta. 
+La variabilidad disminuye exponencialmente con el número de dimensiones.
+
+Para esto, existen algunas soluciones óptimas para poder afrontar esta problemática, estas son las siguientes: 
+Reducir o disminuir el número de dimensiones.
+Aumentar el número de datos.
+
+#### Técnicas de reducción de dimensionalidad
+
+##### Principal Component Analysis (PCA) 
+
+Consiste en mantener solo las características dimensionales que tienen la mayor parte de la varianza y descartar las dimensiones que contienen una varianza casi nula, capturando de esta manera la dirección de máxima varianza, dándose así esta reducción de dimensionalidad de las características de datos. Devuelve P componentes principales en un rango de 1 a N características originales, ordenadas en base a  cuáles características representan mayor varianza.
+  
+##### Linear Discriminant Analysis (LDA) 
+Consiste en explícitamente intentar modelar la diferencia entre las clases de datos. Cada componente busca maximizar la separabilidad entre las diferentes clases, minimizando a su vez la distancia entre elementos de una misma clase. Devuelve L ejes en un rango de 1 a C-1 clases, ordenadas en base a cuanta separabilidad representan.
+   
+
+## Experimentación
+
+
+#### Aplicación web
